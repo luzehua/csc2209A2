@@ -56,6 +56,12 @@ struct sr_instance
     FILE* logfile;
 };
 
+int verify_ip_packet(sr_ip_hdr_t *);
+int verify_icmp_packet(uint8_t*, unsigned int);
+void send_packet(struct sr_instance*, uint8_t*, unsigned int, struct sr_if*, uint32_t);
+void handle_icmp_messages(struct sr_instance*, uint8_t*, unsigned int, uint8_t, uint8_t);
+
+
 /* -- sr_main.c -- */
 int sr_verify_routing_table(struct sr_instance* sr);
 

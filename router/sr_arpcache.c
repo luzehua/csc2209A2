@@ -16,9 +16,98 @@
   checking whether we should resend an request or destroy the arp request.
   See the comments in the header file for an idea of what it should look like.
 */
-void sr_arpcache_sweepreqs(struct sr_instance *sr) { 
-    /* Fill this in */
+void sr_arpcache_sweepreqs(struct sr_instance *sr) {
+    /*
+    Since handle_arpreq as defined in the comments above could destroy your
+    current request, make sure to save the next pointer before calling
+    handle_arpreq when traversing through the ARP requests linked list.
+    */
+    struct sr_arpreq *request  = sr->cache.requests;
+
+    struct sr_arpreq *next = NULL;
+
+    while (request) {
+        next = request->next;
+        handle_arpreq(sr, request);
+        request = next;
+    }
 }
+
+/*
+The handle_arpreq() function is a function you should write, and it should
+handle sending ARP requests if necessary:
+
+function handle_arpreq(req):
+    if difftime(now, req->sent) > 1.0
+        if req->times_sent >= 5:
+            send icmp host unreachable to source addr of all pkts waiting
+              on this request
+            arpreq_destroy(req)
+        else:
+            send arp request
+            req->sent = now
+            req->times_sent++
+*/
+void handle_arpreq(struct sr_instance *sr,struct sr_arpreq *requests) {
+    time_t now;
+    time(&now);
+
+    if (difftime(now, requests->sent) >= 1.0) {
+        if (requests->times_sent >= 5) {
+
+            struct sr_packet *packet = requests->packets;
+            sr_ethernet_hdr_t* packet_ehdr;
+            while (packet) {
+                packet_ehdr = (sr_ethernet_hdr_t *)(packet->buf);
+
+                /* Send ICMP message back to sender */
+                if (sr_get_interface_addr(sr, (unsigned char *)packet_ehdr->ether_dhost)) {
+                    handle_icmp_messages(sr, packet->buf, packet->len, icmp_dest_unreachable, icmp_unreachable_host);
+                }
+
+                packet = packet->next;
+            }
+            sr_arpreq_destroy(&sr->cache, requests);
+        } else {
+
+            struct sr_if *sr_interface = sr_get_interface(sr, requests->packets->iface);
+
+            if (!sr_interface) {
+                printf("*** -> Failed to get interface when creating ARP request\n");
+                return;
+            }
+
+            int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
+            uint8_t *arp_req = malloc(len);
+
+            /* Init ethernet header */
+            sr_ethernet_hdr_t *arpreq_ehdr = (sr_ethernet_hdr_t *)arp_req;
+            memset(arpreq_ehdr->ether_dhost, 0xFF, ETHER_ADDR_LEN);  /* Broadcast MAC address (ff-ff-ff-ff-ff-ff) */
+            memcpy(arpreq_ehdr->ether_shost, sr_interface->addr, ETHER_ADDR_LEN);
+            arpreq_ehdr->ether_type = htons(ethertype_arp);
+
+            /* Init ARP header */
+            sr_arp_hdr_t *arpreq_arphdr = (sr_arp_hdr_t *)(arp_req + sizeof(sr_ethernet_hdr_t));
+            arpreq_arphdr->ar_hrd = (unsigned short) htons(arp_hrd_ethernet);
+            arpreq_arphdr->ar_pro = (unsigned short) htons(ethertype_ip);
+            arpreq_arphdr->ar_hln = (unsigned char) ETHER_ADDR_LEN;
+            arpreq_arphdr->ar_pln = (unsigned char) sizeof(uint32_t);
+            arpreq_arphdr->ar_op = (unsigned short) htons(arp_op_request);
+            memcpy(arpreq_arphdr->ar_sha, sr_interface->addr, ETHER_ADDR_LEN);  /* Source MAC address */
+            memset(arpreq_arphdr->ar_tha, 0x00, ETHER_ADDR_LEN);        /* Target MAC address: 00:00:00:00:00 */
+            arpreq_arphdr->ar_sip = sr_interface->ip;                           /* Source IP address */
+            arpreq_arphdr->ar_tip = requests->ip;                            /* Target IP address */
+
+            sr_send_packet(sr, arp_req, len, sr_interface->name);
+            free(arp_req);
+
+            requests->sent = now;
+            requests->times_sent++;
+        }
+    }
+
+}
+
 
 /* You should not need to touch the rest of this code. */
 

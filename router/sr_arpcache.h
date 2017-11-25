@@ -143,6 +143,8 @@ void sr_arpcache_dump(struct sr_arpcache *cache);
    a destructor, and a cleanup thread times out cache entries every 15
    seconds. */
 
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *requests);
+
 int   sr_arpcache_init(struct sr_arpcache *cache);
 int   sr_arpcache_destroy(struct sr_arpcache *cache);
 void *sr_arpcache_timeout(void *cache_ptr);
