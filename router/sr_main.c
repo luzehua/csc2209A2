@@ -64,10 +64,10 @@ static void sr_load_rt_wrap(struct sr_instance *sr, char *rtable);
  *---------------------------------------------------------------------------*/
 
 int main(int argc, char **argv) {
-    int icmp_query_timeout_intervel = DEFAULT_ICMP_QUERY_TIMEOUT;
+    int icmp_query_timeout_interval = DEFAULT_ICMP_QUERY_TIMEOUT;
     int tcp_established_idle_timeout = DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT;
     int tcp_transitory_idle_timeout = DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT;
-    int nat = DEFAULT_NAT;
+    int isNAT = DEFAULT_NAT;
 
     int c;
     char *host = DEFAULT_HOST;
@@ -113,10 +113,10 @@ int main(int argc, char **argv) {
                 template = optarg;
                 break;
             case 'n':
-                nat = 1;
+                isNAT = 1;
                 break;
             case 'I':
-                icmp_query_timeout_intervel = atoi((char *) optarg);
+                icmp_query_timeout_interval = atoi((char *) optarg);
                 break;
             case 'E':
                 tcp_established_idle_timeout = atoi((char *) optarg);
@@ -130,6 +130,12 @@ int main(int argc, char **argv) {
 
     /* -- zero out sr instance -- */
     sr_init_instance(&sr);
+
+    /* set up NAT default config */
+
+    sr.nat.icmp_query_timeout_interval = icmp_query_timeout_interval;
+    sr.nat.tcp_established_idle_timeout = tcp_established_idle_timeout;
+    sr.nat.tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
 
     /* -- set up routing table from file -- */
     if (template == NULL) {
