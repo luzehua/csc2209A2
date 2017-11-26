@@ -33,10 +33,15 @@
 #include "sr_router.h"
 #include "sr_rt.h"
 
-extern char* optarg;
+extern char *optarg;
 
 /*-----------------------------------------------------------------------------
  *---------------------------------------------------------------------------*/
+
+#define DEFAULT_ICMP_QUERY_TIMEOUT 60
+#define DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT 7440
+#define DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT 300
+#define DEFAULT_NAT 0
 
 #define VERSION_INFO "VNS sr stub code revised 2009-10-14 (rev 0.20)"
 #define DEFAULT_PORT 8888
@@ -45,19 +50,27 @@ extern char* optarg;
 #define DEFAULT_RTABLE "rtable"
 #define DEFAULT_TOPO 0
 
-static void usage(char* );
-static void sr_init_instance(struct sr_instance* );
-static void sr_destroy_instance(struct sr_instance* );
-static void sr_set_user(struct sr_instance* );
-static void sr_load_rt_wrap(struct sr_instance* sr, char* rtable);
+static void usage(char *);
+
+static void sr_init_instance(struct sr_instance *);
+
+static void sr_destroy_instance(struct sr_instance *);
+
+static void sr_set_user(struct sr_instance *);
+
+static void sr_load_rt_wrap(struct sr_instance *sr, char *rtable);
 
 /*-----------------------------------------------------------------------------
  *---------------------------------------------------------------------------*/
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
+    int icmp_query_timeout_intervel = DEFAULT_ICMP_QUERY_TIMEOUT;
+    int tcp_established_idle_timeout = DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT;
+    int tcp_transitory_idle_timeout = DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT;
+    int nat = DEFAULT_NAT;
+
     int c;
-    char *host   = DEFAULT_HOST;
+    char *host = DEFAULT_HOST;
     char *user = 0;
     char *server = DEFAULT_SERVER;
     char *rtable = DEFAULT_RTABLE;
@@ -69,10 +82,8 @@ int main(int argc, char **argv)
 
     printf("Using %s\n", VERSION_INFO);
 
-    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:")) != EOF)
-    {
-        switch (c)
-        {
+    while ((c = getopt(argc, argv, "hs:v:p:u:t:r:l:T:n:I:E:R")) != EOF) {
+        switch (c) {
             case 'h':
                 usage(argv[0]);
                 exit(0);
@@ -101,6 +112,19 @@ int main(int argc, char **argv)
             case 'T':
                 template = optarg;
                 break;
+            case 'n':
+                nat = 1;
+                break;
+            case 'I':
+                icmp_query_timeout_intervel = atoi((char *) optarg);
+                break;
+            case 'E':
+                tcp_established_idle_timeout = atoi((char *) optarg);
+                break;
+            case 'R':
+                tcp_transitory_idle_timeout = atoi((char *) optarg);
+                break;
+
         } /* switch */
     } /* -- while -- */
 
@@ -108,59 +132,52 @@ int main(int argc, char **argv)
     sr_init_instance(&sr);
 
     /* -- set up routing table from file -- */
-    if(template == NULL) {
+    if (template == NULL) {
         sr.template[0] = '\0';
         sr_load_rt_wrap(&sr, rtable);
-    }
-    else
+    } else
         strncpy(sr.template, template, 30);
 
     sr.topo_id = topo;
-    strncpy(sr.host,host,32);
+    strncpy(sr.host, host, 32);
 
-    if(! user )
-    { sr_set_user(&sr); }
-    else
-    { strncpy(sr.user, user, 32); }
+    if (!user) { sr_set_user(&sr); }
+    else { strncpy(sr.user, user, 32); }
 
     /* -- set up file pointer for logging of raw packets -- */
-    if(logfile != 0)
-    {
-        sr.logfile = sr_dump_open(logfile,0,PACKET_DUMP_SIZE);
-        if(!sr.logfile)
-        {
-            fprintf(stderr,"Error opening up dump file %s\n",
+    if (logfile != 0) {
+        sr.logfile = sr_dump_open(logfile, 0, PACKET_DUMP_SIZE);
+        if (!sr.logfile) {
+            fprintf(stderr, "Error opening up dump file %s\n",
                     logfile);
             exit(1);
         }
     }
 
     Debug("Client %s connecting to Server %s:%d\n", sr.user, server, port);
-    if(template)
+    if (template)
         Debug("Requesting topology template %s\n", template);
     else
         Debug("Requesting topology %d\n", topo);
 
     /* connect to server and negotiate session */
-    if(sr_connect_to_server(&sr,port,server) == -1)
-    {
+    if (sr_connect_to_server(&sr, port, server) == -1) {
         return 1;
     }
 
-    if(template != NULL && strcmp(rtable, "rtable.vrhost") == 0) { /* we've recv'd the rtable now, so read it in */
+    if (template != NULL && strcmp(rtable, "rtable.vrhost") == 0) { /* we've recv'd the rtable now, so read it in */
         Debug("Connected to new instantiation of topology template %s\n", template);
         sr_load_rt_wrap(&sr, "rtable.vrhost");
-    }
-    else {
-      /* Read from specified routing table */
-      sr_load_rt_wrap(&sr, rtable);
+    } else {
+        /* Read from specified routing table */
+        sr_load_rt_wrap(&sr, rtable);
     }
 
     /* call router init (for arp subsystem etc.) */
     sr_init(&sr);
 
     /* -- whizbang main loop ;-) */
-    while( sr_read_from_server(&sr) == 1);
+    while (sr_read_from_server(&sr) == 1);
 
     sr_destroy_instance(&sr);
 
@@ -172,15 +189,16 @@ int main(int argc, char **argv)
  * Scope: local
  *---------------------------------------------------------------------------*/
 
-static void usage(char* argv0)
-{
+static void usage(char *argv0) {
     printf("Simple Router Client\n");
-    printf("Format: %s [-h] [-v host] [-s server] [-p port] \n",argv0);
+    printf("Format: %s [-h] [-v host] [-s server] [-p port] \n", argv0);
     printf("           [-T template_name] [-u username] \n");
     printf("           [-t topo id] [-r routing table] \n");
     printf("           [-l log file] \n");
-    printf("   defaults server=%s port=%d host=%s  \n",
-            DEFAULT_SERVER, DEFAULT_PORT, DEFAULT_HOST );
+    printf("   defaults server=%s port=%d host=%s\n   "
+                   "isNAT=%d ICMP timeout interval=%d TCP establish timeout=%d TCP transitory idle timeout=%d\n",
+           DEFAULT_SERVER, DEFAULT_PORT, DEFAULT_HOST, DEFAULT_NAT,
+           DEFAULT_ICMP_QUERY_TIMEOUT, DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT, DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT);
 } /* -- usage -- */
 
 /*-----------------------------------------------------------------------------
@@ -188,21 +206,17 @@ static void usage(char* argv0)
  * Scope: local
  *---------------------------------------------------------------------------*/
 
-void sr_set_user(struct sr_instance* sr)
-{
+void sr_set_user(struct sr_instance *sr) {
     uid_t uid = getuid();
-    struct passwd* pw = 0;
+    struct passwd *pw = 0;
 
     /* REQUIRES */
     assert(sr);
 
-    if(( pw = getpwuid(uid) ) == 0)
-    {
-        fprintf (stderr, "Error getting username, using something silly\n");
+    if ((pw = getpwuid(uid)) == 0) {
+        fprintf(stderr, "Error getting username, using something silly\n");
         strncpy(sr->user, "something_silly", 32);
-    }
-    else
-    {
+    } else {
         strncpy(sr->user, pw->pw_name, 32);
     }
 
@@ -215,13 +229,11 @@ void sr_set_user(struct sr_instance* sr)
  *
  *----------------------------------------------------------------------------*/
 
-static void sr_destroy_instance(struct sr_instance* sr)
-{
+static void sr_destroy_instance(struct sr_instance *sr) {
     /* REQUIRES */
     assert(sr);
 
-    if(sr->logfile)
-    {
+    if (sr->logfile) {
         sr_dump_close(sr->logfile);
     }
 
@@ -237,8 +249,7 @@ static void sr_destroy_instance(struct sr_instance* sr)
  *
  *----------------------------------------------------------------------------*/
 
-static void sr_init_instance(struct sr_instance* sr)
-{
+static void sr_init_instance(struct sr_instance *sr) {
     /* REQUIRES */
     assert(sr);
 
@@ -266,35 +277,29 @@ static void sr_init_instance(struct sr_instance* sr)
  *
  *---------------------------------------------------------------------------*/
 
-int sr_verify_routing_table(struct sr_instance* sr)
-{
-    struct sr_rt* rt_walker = 0;
-    struct sr_if* if_walker = 0;
+int sr_verify_routing_table(struct sr_instance *sr) {
+    struct sr_rt *rt_walker = 0;
+    struct sr_if *if_walker = 0;
     int ret = 0;
 
     /* -- REQUIRES --*/
     assert(sr);
 
-    if( (sr->if_list == 0) || (sr->routing_table == 0))
-    {
+    if ((sr->if_list == 0) || (sr->routing_table == 0)) {
         return 999; /* doh! */
     }
 
     rt_walker = sr->routing_table;
 
-    while(rt_walker)
-    {
+    while (rt_walker) {
         /* -- check to see if interface exists -- */
         if_walker = sr->if_list;
-        while(if_walker)
-        {
-            if( strncmp(if_walker->name,rt_walker->interface,sr_IFACE_NAMELEN)
-                    == 0)
-            { break; }
+        while (if_walker) {
+            if (strncmp(if_walker->name, rt_walker->interface, sr_IFACE_NAMELEN)
+                == 0) { break; }
             if_walker = if_walker->next;
         }
-        if(if_walker == 0)
-        { ret++; } /* -- interface not found! -- */
+        if (if_walker == 0) { ret++; } /* -- interface not found! -- */
 
         rt_walker = rt_walker->next;
     } /* -- while -- */
@@ -302,9 +307,9 @@ int sr_verify_routing_table(struct sr_instance* sr)
     return ret;
 } /* -- sr_verify_routing_table -- */
 
-static void sr_load_rt_wrap(struct sr_instance* sr, char* rtable) {
-    if(sr_load_rt(sr, rtable) != 0) {
-        fprintf(stderr,"Error setting up routing table from file %s\n",
+static void sr_load_rt_wrap(struct sr_instance *sr, char *rtable) {
+    if (sr_load_rt(sr, rtable) != 0) {
+        fprintf(stderr, "Error setting up routing table from file %s\n",
                 rtable);
         exit(1);
     }
