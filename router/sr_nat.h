@@ -6,6 +6,8 @@
 #include <time.h>
 #include <pthread.h>
 
+#define NAT_INT_INTF "eth1"
+#define NAT_EXT_INTF "eth2"
 
 #define MIN_NAT_PORT 1024
 #define MAX_NAT_PORT 65535
