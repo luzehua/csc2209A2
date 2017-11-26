@@ -44,8 +44,7 @@ int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
 
     /* free nat memory here */
     struct sr_nat_mapping *mapping = nat->mappings;
-    while (mapping)
-    {
+    while (mapping) {
         struct sr_nat_mapping *prev_mapping = mapping;
         mapping = mapping->next;
         free(prev_mapping);
@@ -82,7 +81,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
                 case nat_mapping_tcp: {
 
                     struct sr_nat_connection *conn = mapping->conns;
-                    while(conn) {
+                    while (conn) {
                         /* TODO: add state check in conns struct  */
                         if (mapping->conns) {
                             /* TCP Established Idle Timeout */
@@ -223,4 +222,52 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
     pthread_mutex_unlock(&(nat->lock));
     return mapping;
+}
+
+/* Custom: finds a connection from a mapping's list */
+struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip) {
+    struct sr_nat_connection *conn = mapping->conns;
+
+    while (conn) {
+        if (conn->ip == ip) {
+            return conn;
+        }
+
+        conn = conn->next;
+    }
+
+    return NULL;
+}
+
+/* Custom: inserts a connection to a mapping's list */
+struct sr_nat_connection *sr_nat_add_conn(struct sr_nat_mapping *mapping, uint32_t ip) {
+    struct sr_nat_connection *conn = (struct sr_nat_connection *) malloc(sizeof(struct sr_nat_connection));
+    memset(conn, 0, sizeof(struct sr_nat_connection));
+
+    conn->ip = ip;
+    conn->state = tcp_state_closed;
+    conn->last_updated = time(NULL);
+
+    /* Add as head of linked list */
+    conn->next = mapping->conns;
+    mapping->conns = conn;
+
+    return conn;
+}
+
+/* Custom: Removes a connection from the linked list */
+void sr_nat_remove_conn(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_connection *conn,
+                        struct sr_nat_connection *prev_conn) {
+    pthread_mutex_lock(&(nat->lock));
+
+    if (!prev_conn) {
+        /* conn was the head */
+        mapping->conns = conn->next;
+    } else {
+        prev_conn->next = conn->next;
+    }
+
+    free(conn);
+
+    pthread_mutex_unlock(&(nat->lock));
 }
