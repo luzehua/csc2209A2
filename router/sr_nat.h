@@ -33,6 +33,9 @@ struct sr_nat_mapping {
     struct sr_nat_mapping *next;
 };
 
+void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping);
+
+
 struct sr_nat {
     /* add any fields here */
     int icmp_query_timeout_interval;

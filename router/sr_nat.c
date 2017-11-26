@@ -59,10 +59,64 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         time_t curtime = time(NULL);
 
         /* handle periodic tasks here */
+        /* Remove timed out mappings */
+        struct sr_nat_mapping *prev_mapping = NULL;
+        struct sr_nat_mapping *mapping = nat->mappings;
+        while (mapping) {
+            switch (mapping->type) {
+                case nat_mapping_icmp: {
+                    /* ICMP query timeout */
+                    if (mapping->last_updated + nat->icmp_query_timeout_interval > curtime) {
+                        sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                    }
+                    break;
+                }
+
+                case nat_mapping_tcp: {
+
+                    struct sr_nat_connection *conn = mapping->conns;
+                    while(conn) {
+                        /* TODO: add state check in conns struct  */
+                        if (mapping->conns) {
+                            /* TCP Established Idle Timeout */
+                            if (mapping->last_updated + nat->tcp_established_idle_timeout > curtime) {
+                                sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                            }
+                        } else {
+                            /* TCP Transitory Idle Timeout */
+                            if (mapping->last_updated + nat->tcp_transitory_idle_timeout > curtime) {
+                                sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                            }
+                        }
+
+
+                    }
+
+                    break;
+                }
+            }
+
+            prev_mapping = mapping;
+            mapping = mapping->next;
+        }
 
         pthread_mutex_unlock(&(nat->lock));
     }
     return NULL;
+}
+
+/* Custom: Removes a mapping from the linked list */
+void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping) {
+    pthread_mutex_lock(&(nat->lock));
+    if (!prev_mapping) {
+        /* mapping was the head */
+        nat->mappings = mapping->next;
+    } else {
+        prev_mapping->next = mapping->next;
+
+        /* TODO: free mapping */
+    }
+    pthread_mutex_unlock(&(nat->lock));
 }
 
 /* Get the mapping associated with given external port.
@@ -153,6 +207,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
             break;
         }
     }
+    /* TODO: check the range of valid port*/
 
     mapping->next = nat->mappings;
     nat->mappings = mapping;
