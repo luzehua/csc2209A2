@@ -6,6 +6,10 @@
 #include <time.h>
 #include <pthread.h>
 
+
+#define MIN_NAT_PORT 1024
+#define MAX_NAT_PORT 65535
+
 typedef enum {
     nat_mapping_icmp,
     nat_mapping_tcp

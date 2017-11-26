@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <memory.h>
 
+int next_tcp_port = 0;
+int next_icmp_port = 0;
+
 int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
 
     assert(nat);
@@ -27,6 +30,9 @@ int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
 
     nat->mappings = NULL;
     /* Initialize any variables here */
+
+    next_tcp_port = MIN_NAT_PORT;
+    next_icmp_port = MIN_NAT_PORT;
 
     return success;
 }
@@ -81,7 +87,7 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
         }
         mapping = mapping->next;
     }
-    
+
     pthread_mutex_unlock(&(nat->lock));
     return copy;
 }
@@ -120,9 +126,37 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
                                              uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type) {
 
     pthread_mutex_lock(&(nat->lock));
-
     /* handle insert here, create a mapping, and then return a copy of it */
-    struct sr_nat_mapping *mapping = NULL;
+//    struct sr_nat_mapping *mapping = NULL;
+    struct sr_nat_mapping *mapping = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
+
+    mapping->ip_int = ip_int;
+    mapping->aux_int = aux_int;
+    mapping->type = type;
+    mapping->last_updated = time(NULL);
+    mapping->conns = NULL;
+
+    switch (type) {
+        case nat_mapping_icmp: {
+            mapping->aux_ext = next_icmp_port++;
+            if (next_icmp_port >= MAX_NAT_PORT) {
+                next_icmp_port = MIN_NAT_PORT;
+            }
+            break;
+        }
+
+        case nat_mapping_tcp: {
+            mapping->aux_ext = next_tcp_port++;
+            if (next_tcp_port >= MAX_NAT_PORT) {
+                next_tcp_port = MIN_NAT_PORT;
+            }
+            break;
+        }
+    }
+
+    mapping->next = nat->mappings;
+    nat->mappings = mapping;
+
 
     pthread_mutex_unlock(&(nat->lock));
     return mapping;
