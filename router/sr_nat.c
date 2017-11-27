@@ -30,6 +30,7 @@ int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
 
     nat->mappings = NULL;
     /* Initialize any variables here */
+    nat->incoming = NULL;
 
     next_tcp_port = MIN_NAT_PORT;
     next_icmp_port = MIN_NAT_PORT;
@@ -133,7 +134,6 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
 
     pthread_mutex_lock(&(nat->lock));
 
-    /* handle lookup here, malloc and assign to copy */
     struct sr_nat_mapping *copy = NULL;
 
     struct sr_nat_mapping *mapping = nat->mappings;
@@ -143,7 +143,6 @@ struct sr_nat_mapping *sr_nat_lookup_external(struct sr_nat *nat,
             copy = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
             memcpy(copy, mapping, sizeof(struct sr_nat_mapping));
 
-            mapping->last_updated = time(NULL);
             break;
         }
         mapping = mapping->next;
@@ -160,22 +159,19 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
 
     pthread_mutex_lock(&(nat->lock));
 
-    /* handle lookup here, malloc and assign to copy. */
     struct sr_nat_mapping *copy = NULL;
-
     struct sr_nat_mapping *mapping = nat->mappings;
 
     while (mapping) {
-        if (mapping->type == type && mapping->aux_ext == aux_int) {
+        /* go through the linked list mapping table */
+        if (mapping->ip_int == ip_int && mapping->type == type && mapping->aux_int == aux_int) {
             copy = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
             memcpy(copy, mapping, sizeof(struct sr_nat_mapping));
 
-            mapping->last_updated = time(NULL);
             break;
         }
         mapping = mapping->next;
     }
-
     pthread_mutex_unlock(&(nat->lock));
     return copy;
 }
@@ -188,10 +184,19 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
     pthread_mutex_lock(&(nat->lock));
     /* handle insert here, create a mapping, and then return a copy of it */
-//    struct sr_nat_mapping *mapping = NULL;
-    struct sr_nat_mapping *mapping = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
+
+    /* See if it already exists */
+    struct sr_nat_mapping *mapping = sr_nat_lookup_internal(nat, ip_int, aux_int, type);
+    if (mapping)
+    {
+        return mapping;
+    }
+
+    mapping = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
 
     mapping->ip_int = ip_int;
+    /* TODO: double check ip_ext */
+    mapping->ip_ext = 0;
     mapping->aux_int = aux_int;
     mapping->type = type;
     mapping->last_updated = time(NULL);
@@ -214,14 +219,17 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
             break;
         }
     }
-    /* TODO: check the range of valid port*/
 
     mapping->next = nat->mappings;
     nat->mappings = mapping;
 
+    /* Make a copy for thread safety */
+    struct sr_nat_mapping *copy = (struct sr_nat_mapping *)malloc(sizeof(struct sr_nat_mapping));
+    memcpy(copy, mapping, sizeof(struct sr_nat_mapping));
+
 
     pthread_mutex_unlock(&(nat->lock));
-    return mapping;
+    return copy;
 }
 
 /* Custom: finds a connection from a mapping's list */
