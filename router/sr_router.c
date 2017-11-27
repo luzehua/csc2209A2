@@ -469,3 +469,238 @@ void handle_icmp_messages(struct sr_instance *sr, uint8_t *packet, unsigned int 
 
     }
 }
+
+/* Custom: handles IP packet with NAT functionality */
+void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
+{
+    printf("NAT is on!\n");
+
+    uint8_t *payload = (packet + sizeof(sr_ethernet_hdr_t));
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)payload;
+
+    struct sr_nat_mapping *mapping = NULL;
+
+    if (strncmp(interface, NAT_INT_INTF, sr_IFACE_NAMELEN) == 0)
+    {
+        /* Internal -> external */
+        printf("***IP NAT: packet from internal interface\n");
+
+        /* Check if destined for one of the router's interfaces */
+        struct sr_if *dest_is_router = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
+
+        //TODO: verify the icmp message when a internal message sent router.
+        if (dest_is_router)
+        {
+            handle_icmp_messages(sr, packet, len, icmp_dest_unreachable, icmp_unreachable_port);
+        }
+        else
+        {
+            /* Outbound message */
+            printf("***IP NAT internal: outbound message\n");
+
+            struct sr_if *ext_intf = sr_get_interface(sr, "eth2");
+
+            switch (ip_hdr->ip_p)
+            {
+                case ip_protocol_icmp:
+                {
+                    printf("***IP NAT internal: ICMP message\n");
+
+                    /* Verify ICMP header */
+                    if (verify_icmp_packet(packet, len) == -1)
+                    {
+                        return;
+                    }
+
+                    sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+                    /* Find NAT mapping based on ICMP id */
+                    mapping = sr_nat_lookup_internal(&(sr->nat), ip_hdr->ip_src, icmp_hdr->icmp_id, nat_mapping_icmp);
+                    if (!mapping)
+                    {
+                        mapping = sr_nat_insert_mapping(&(sr->nat), ip_hdr->ip_src, icmp_hdr->icmp_id, nat_mapping_icmp);
+                        mapping->ip_ext = ext_intf->ip;
+                        mapping->last_updated = time(NULL);
+                    }
+
+                    /* Update ICMP header with mapping's ID */
+                    icmp_hdr->icmp_id = mapping->aux_ext;
+                    icmp_hdr->icmp_sum = 0;
+                    icmp_hdr->icmp_sum = cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+
+                    break;
+                }
+
+                case ip_protocol_tcp:
+                {
+                    printf("IP NAT internal: TCP message\n");
+
+                    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+                    /* Verify TCP header */
+                    if (verify_tcp(packet, len) == -1)
+                    {
+                        return;
+                    }
+
+                    /* Find NAT mapping based on TCP source port */
+                    mapping = sr_nat_lookup_internal(&(sr->nat), ip_hdr->ip_src, ntohs(tcp_hdr->src_port), nat_mapping_tcp);
+                    if (!mapping)
+                    {
+                        mapping = sr_nat_insert_mapping(&(sr->nat), ip_hdr->ip_src, ntohs(tcp_hdr->src_port), nat_mapping_tcp);
+                        mapping->ip_ext = ext_intf->ip;
+                        mapping->last_updated = time(NULL);
+                    }
+
+                    pthread_mutex_lock(&(sr->nat.lock));
+
+                    struct sr_nat_connection *conn = sr_nat_get_conn(mapping, ip_hdr->ip_dst);
+                    if (!conn)
+                    {
+                        conn = sr_nat_add_conn(mapping, ip_hdr->ip_dst);
+                    }
+
+                    /* TODO: deal with conn states */
+
+                    pthread_mutex_unlock(&(sr->nat.lock));
+
+                    /* Update TCP header with mapping's external port */
+                    tcp_hdr->src_port = htons(mapping->aux_ext);
+
+                    tcp_hdr->tcp_cksum = 0;
+                    tcp_hdr->tcp_cksum = verify_ip_packet(packet, len);
+
+                    break;
+                }
+            }
+
+            /* Update IP header's source with NAT's external IP */
+            ip_hdr->ip_src = ext_intf->ip;
+            ip_hdr->ip_sum = 0;
+            ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+        }
+    }
+    else if (strncmp(interface, NAT_EXT_INTF, sr_IFACE_NAMELEN) == 0)
+    {
+        /* External -> internal */
+        printf("IP NAT external: external interface\n");
+
+        /* Check if destined for one of the router's interfaces */
+        struct sr_if *dest = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
+
+        if (dest)
+        {
+            /* Inbound message */
+            printf("IP NAT external: inbound message\n");
+
+            switch (ip_hdr->ip_p)
+            {
+                case ip_protocol_icmp:
+                {
+                    printf("IP NAT external: ICMP message\n");
+
+                    /* Verify ICMP header */
+                    if (verify_icmp_packet(packet, len) == -1)
+                    {
+                        return;
+                    }
+
+                    sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+                    /* Find NAT mapping based on ICMP id */
+                    mapping = sr_nat_lookup_external(&(sr->nat), icmp_hdr->icmp_id, nat_mapping_icmp);
+                    if (!mapping)
+                    {
+                        printf("IP NAT external: can't find ICMP mapping, dropping\n");
+                        return;
+                    }
+
+                    /* Update ICMP header with mapping's internal ID */
+                    icmp_hdr->icmp_id = mapping->aux_int;
+                    icmp_hdr->icmp_sum = 0;
+                    icmp_hdr->icmp_sum = cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
+
+                    break;
+                }
+
+                case ip_protocol_tcp:
+                {
+                    printf("IP NAT external: TCP message\n");
+
+                    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+                    /* Verify TCP header */
+                    if (verify_tcp(packet, len) == -1)
+                    {
+                        return;
+                    }
+
+                    /* Restricted ports */
+                    if (ntohs(tcp_hdr->dest_port) < MIN_NAT_PORT)
+                    {
+                        printf("IP NAT external: restricted TCP port, dropping\n");
+                        handle_icmp_messages(sr, packet, len, icmp_dest_unreachable, icmp_unreachable_port);
+                        return;
+                    }
+
+                    /* Find NAT mapping based on TCP destination port */
+                    mapping = sr_nat_lookup_external(&(sr->nat), ntohs(tcp_hdr->dest_port), nat_mapping_tcp);
+                    if (!mapping)
+                    {
+                        /* Add new SYN if it's a valid route */
+                        if (tcp_hdr->syn)
+                        {
+                            struct sr_rt *rt = (struct sr_rt *)match_longest_prefix(sr, ip_hdr->ip_dst);
+                            if (rt)
+                            {
+                                add_incoming_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->dest_port, packet, len);
+                            }
+                        }
+
+                        printf("IP NAT external: can't find TCP mapping, dropping\n");
+                        return;
+                    }
+
+                    pthread_mutex_lock(&(sr->nat.lock));
+
+                    struct sr_nat_connection *conn = sr_nat_get_conn(mapping, ip_hdr->ip_src);
+                    if (!conn)
+                    {
+                        conn = sr_nat_add_conn(mapping, ip_hdr->ip_src);
+                    }
+
+                    /* TODO: handle conn states */
+
+                    pthread_mutex_unlock(&(sr->nat.lock));
+
+                    /* Update TCP header's destination port with mapping's internal port */
+                    tcp_hdr->dest_port = htons(mapping->aux_int);
+
+                    tcp_hdr->tcp_cksum = 0;
+                    tcp_hdr->tcp_cksum = verify_ip_packet(packet, len);
+
+                    break;
+                }
+            }
+        }
+        else
+        {
+            printf("IP NAT external: not destined for router, dropping\n");
+            return;
+        }
+
+        /* Update IP header destination with mapping's internal IP */
+        ip_hdr->ip_dst = mapping->ip_int;
+        ip_hdr->ip_sum = 0;
+        ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+    }
+
+    /* Send packet if we did stuff before */
+    if (mapping)
+    {
+        forward_ip(sr, packet, len);
+
+        free(mapping);
+        return;
+    }
+}
