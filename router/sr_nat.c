@@ -113,6 +113,39 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
     return NULL;
 }
 
+/* Custom: add the inbound TCP SYN connection */
+void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uint8_t *packet, unsigned int len) {
+
+    pthread_mutex_lock(&(nat->lock));
+
+    struct sr_nat_tcp_syn *cur_inbound = nat->incoming;
+
+    /* traverse all cur_inbound SYNs */
+    while(cur_inbound) {
+        /* check whether SYN existed*/
+        if((cur_inbound->ip == src_ip) && (cur_inbound->port == src_port)) {
+            return;
+        }
+        cur_inbound = cur_inbound->next;
+    }
+
+    /* construct the SYN */
+    cur_inbound = (struct sr_nat_tcp_syn*)malloc(sizeof(struct sr_nat_tcp_syn));
+    cur_inbound->ip = src_ip;
+    cur_inbound->port = src_port;
+    cur_inbound->packet = (uint8_t*)malloc(len);
+    memcpy(cur_inbound->packet, packet, len);
+    cur_inbound->len = len;
+    cur_inbound->last_received = time(NULL);
+
+    /* Add as the head of cur_inbound list */
+    /* avoid the corner case when linked list is empty */
+    cur_inbound->next = nat->incoming;
+    nat->incoming = cur_inbound;
+
+    pthread_mutex_unlock;
+}
+
 /* Custom: Removes a mapping from the linked list */
 void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping) {
     pthread_mutex_lock(&(nat->lock));
@@ -209,6 +242,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
     mapping->last_updated = time(NULL);
     mapping->conns = NULL;
 
+    /* TODO: double check the port num*/
     switch (type) {
         case nat_mapping_icmp: {
             mapping->aux_ext = next_icmp_port++;
