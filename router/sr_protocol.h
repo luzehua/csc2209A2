@@ -79,6 +79,8 @@ struct sr_icmp_hdr {
     uint8_t icmp_type;
     uint8_t icmp_code;
     uint16_t icmp_sum;
+    uint16_t icmp_id;
+    uint16_t icmp_seq;
 
 } __attribute__((packed));
 typedef struct sr_icmp_hdr sr_icmp_hdr_t;
@@ -126,7 +128,7 @@ struct sr_ip_hdr {
     unsigned int ip_v : 4; /* version */
     unsigned int ip_hl : 4; /* header length */
 #else
-#error "Byte ordering ot specified "
+#error "Byte ordering not specified "
 #endif
     uint8_t ip_tos;          /* type of service */
     uint16_t ip_len;         /* total length */
@@ -197,8 +199,8 @@ struct sr_tcp_hdr
     uint16_t dest_port;
     uint32_t seq;
     uint32_t ack;
-    uint8_t offset; // 4 bits
-    /* uint8_t flags;       // CWR, ECE, URG, ACK, PSH, RST, SYN, FIN */
+    uint8_t offset;
+    /* uint8_t flags;       CWR, ECE, URG, ACK, PSH, RST, SYN, FIN */
 #if __BYTE_ORDER == __BIG_ENDIAN
     unsigned int cwr : 1; /* CWR */
     unsigned int ece : 1; /* ECE */
