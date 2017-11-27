@@ -302,7 +302,7 @@ int verify_tcp(sr_tcp_hdr_t *header)
         return -1;
     }
 
-    /* Verify that the TCP checksum matches */
+    /* Verify TCP checksum */
     uint16_t old_cksum = header->tcp_cksum;
     header->tcp_cksum = 0;
     uint16_t new_cksum = cksum(header, header->offset * 4);
@@ -319,7 +319,7 @@ int verify_tcp(sr_tcp_hdr_t *header)
 int verify_icmp_packet(uint8_t *payload, unsigned int len) {
     sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) payload;
 
-    /* Verify that header length is valid */
+    /* Verify header length is valid */
     if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_hdr_t)) {
         printf("ICMP: insufficient header length\n");
         return -1;
@@ -327,7 +327,7 @@ int verify_icmp_packet(uint8_t *payload, unsigned int len) {
 
     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *) (payload + sizeof(sr_ip_hdr_t));
 
-    /* Verify that the ICMP checksum matches */
+    /* Verify ICMP checksum*/
     uint16_t old_cksum = icmp_hdr->icmp_sum;
     icmp_hdr->icmp_sum = 0;
     uint16_t new_cksum = cksum(icmp_hdr, ntohs(ip_hdr->ip_len) - sizeof(sr_ip_hdr_t));
@@ -538,7 +538,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(packet, len) == -1)
+                    if (verify_tcp(tcp_hdr) == -1)
                     {
                         return;
                     }
@@ -560,7 +560,48 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                         conn = sr_nat_add_conn(mapping, ip_hdr->ip_dst);
                     }
 
-                    /* TODO: deal with conn states */
+                    switch (conn->state)
+                    {
+                        case tcp_state_established:
+                        {
+                            /* ESTAB -> CLOSED (ACK of FIN) */
+                            if (tcp_hdr->fin && tcp_hdr->ack)
+                            {
+                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->state = tcp_state_closed;
+                            }
+                            break;
+                        }
+
+                        case tcp_state_closed:
+                        {
+                            /* CLOSED -> SYN_SENT */
+                            if (!tcp_hdr->ack && tcp_hdr->syn && ntohl(tcp_hdr->ack) == 0)
+                            {
+                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->state = tcp_state_syn_sent;
+                            }
+                            break;
+                        }
+
+                        case tcp_state_syn_received:
+                        {
+                            /* SYN_RCVD -> ESTAB (ACK of SYN) */
+                            if (!tcp_hdr->syn && ntohl(tcp_hdr->seq) == conn->client_sn + 1 && ntohl(tcp_hdr->ack) == conn->server_sn + 1)
+                            {
+                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->state = tcp_state_established;
+                            }
+
+                            add_inbound_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->src_port, packet, len);
+                            break;
+                        }
+
+                        default:
+                        {
+                            break;
+                        }
+                    }
 
                     pthread_mutex_unlock(&(sr->nat.lock));
 
@@ -568,7 +609,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                     tcp_hdr->src_port = htons(mapping->aux_ext);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = verify_ip_packet(packet, len);
+                    tcp_hdr->tcp_cksum = verify_tcp(packet, len);
 
                     break;
                 }
@@ -630,7 +671,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(packet, len) == -1)
+                    if (verify_tcp(tcp_hdr) == -1)
                     {
                         return;
                     }
@@ -653,7 +694,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                             struct sr_rt *rt = (struct sr_rt *)match_longest_prefix(sr, ip_hdr->ip_dst);
                             if (rt)
                             {
-                                add_incoming_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->dest_port, packet, len);
+                                add_inbound_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->dest_port, packet, len);
                             }
                         }
 
@@ -669,7 +710,40 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                         conn = sr_nat_add_conn(mapping, ip_hdr->ip_src);
                     }
 
-                    /* TODO: handle conn states */
+                    switch (conn->state)
+                    {
+                        case tcp_state_syn_sent:
+                        {
+                            /* SYN_SENT -> SYN_RECV */
+                            if (tcp_hdr->syn)
+                            {
+                                if (tcp_hdr->ack && ntohl(tcp_hdr->ack) == conn->client_sn + 1)
+                                {
+                                    /* Simultaneous open */
+                                    conn->server_sn = ntohl(tcp_hdr->seq);
+                                    conn->state = tcp_state_syn_received;
+                                }
+                                else if (!tcp_hdr->ack && ntohl(tcp_hdr->ack) == 0)
+                                {
+                                    /* SYN + initial seq num of 0 */
+                                    conn->server_sn = ntohl(tcp_hdr->seq);
+                                    conn->state = tcp_state_syn_received;
+                                }
+                            }
+                            break;
+                        }
+
+                        case tcp_state_syn_received:
+                        {
+                            add_inbound_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->src_port, packet, len);
+                            break;
+                        }
+
+                        default:
+                        {
+                            break;
+                        }
+                    }
 
                     pthread_mutex_unlock(&(sr->nat.lock));
 
@@ -677,7 +751,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                     tcp_hdr->dest_port = htons(mapping->aux_int);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = verify_ip_packet(packet, len);
+                    tcp_hdr->tcp_cksum = verify_tcp(tcp_hdr);
 
                     break;
                 }
@@ -698,6 +772,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
     /* Send packet if we did stuff before */
     if (mapping)
     {
+        /* TODO:forward ip */
         forward_ip(sr, packet, len);
 
         free(mapping);

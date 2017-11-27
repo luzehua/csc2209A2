@@ -71,16 +71,17 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         /* Handle inbound SYNs */
         struct sr_nat_tcp_syn *prev_inbound = NULL;
         struct sr_nat_tcp_syn *curr_inbound = nat->incoming_SYNs;
-        while(curr_inbound) {
+        while (curr_inbound) {
             /* do not respond to unsolicited inbound SYN packet for at least 6 seconds */
-            if(difftime(currtime, curr_inbound->last_received) > 6) {
+            if (difftime(currtime, curr_inbound->last_received) > 6) {
                 struct sr_nat_mapping *mapping = sr_nat_lookup_external(nat, curr_inbound->port, nat_mapping_tcp);
-                if(!mapping) {
-                    handle_icmp_messages(nat->sr, curr_inbound->packet, curr_inbound->len, icmp_dest_unreachable, icmp_unreachable_port);
+                if (!mapping) {
+                    handle_icmp_messages(nat->sr, curr_inbound->packet, curr_inbound->len, icmp_dest_unreachable,
+                                         icmp_unreachable_port);
                 }
 
                 /* remove the syn */
-                if(prev_inbound) { /* not linked list head */
+                if (prev_inbound) { /* not linked list head */
                     prev_inbound->next = curr_inbound->next;
                 } else { /* head */
                     nat->incoming_SYNs = curr_inbound->next;
@@ -113,28 +114,31 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
                     struct sr_nat_connection *prev = NULL; /* Used to remove element in Linked list*/
                     struct sr_nat_connection *conn = mapping->conns;
 
+                    int flag_remove_mapping = 1;
                     while (conn) {
                         /* TODO: add state check in conns struct  */
-                        switch(conn->state) {
+                        switch (conn->state) {
                             case tcp_state_syn_sent:
                             case tcp_state_syn_received:
                             case tcp_state_last_ack:
-                            case tcp_state_closing:
-                            {
+                            case tcp_state_closing: {
                                 /* TCP Transitory Idle Timeout */
                                 if (mapping->last_updated + nat->tcp_transitory_idle_timeout > currtime) {
                                     sr_nat_remove_conn(nat, mapping, conn, prev);
+                                } else {
+                                    flag_remove_mapping = 0;
                                 }
                                 break;
                             }
                             case tcp_state_established:
                             case tcp_state_fin_wait_1:
                             case tcp_state_fin_wait_2:
-                            case tcp_state_close_wait:
-                            {
+                            case tcp_state_close_wait: {
                                 /* TCP Established Idle Timeout */
                                 if (mapping->last_updated + nat->tcp_established_idle_timeout > currtime) {
                                     sr_nat_remove_conn(nat, mapping, conn, prev);
+                                } else {
+                                    flag_remove_mapping = 0;
                                 }
                                 break;
                             }
@@ -146,8 +150,9 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
                         prev = conn;
                         conn = conn->next;
                     }
-
-                    sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                    if (flag_remove_mapping) {
+                        sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                    }
 
                     break;
                 }
@@ -171,19 +176,19 @@ void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uin
     struct sr_nat_tcp_syn *cur_inbound = nat->incoming_SYNs;
 
     /* traverse all cur_inbound SYNs */
-    while(cur_inbound) {
+    while (cur_inbound) {
         /* check whether SYN existed*/
-        if((cur_inbound->ip == src_ip) && (cur_inbound->port == src_port)) {
+        if ((cur_inbound->ip == src_ip) && (cur_inbound->port == src_port)) {
             return;
         }
         cur_inbound = cur_inbound->next;
     }
 
     /* construct the SYN */
-    cur_inbound = (struct sr_nat_tcp_syn*)malloc(sizeof(struct sr_nat_tcp_syn));
+    cur_inbound = (struct sr_nat_tcp_syn *) malloc(sizeof(struct sr_nat_tcp_syn));
     cur_inbound->ip = src_ip;
     cur_inbound->port = src_port;
-    cur_inbound->packet = (uint8_t*)malloc(len);
+    cur_inbound->packet = (uint8_t *) malloc(len);
     memcpy(cur_inbound->packet, packet, len);
     cur_inbound->len = len;
     cur_inbound->last_received = time(NULL);
