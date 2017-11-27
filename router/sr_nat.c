@@ -63,7 +63,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         sleep(1.0);
         pthread_mutex_lock(&(nat->lock));
 
-        time_t curtime = time(NULL);
+        time_t currtime = time(NULL);
 
         /* handle periodic tasks here */
         /* Remove timed out mappings */
@@ -73,7 +73,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
             switch (mapping->type) {
                 case nat_mapping_icmp: {
                     /* ICMP query timeout */
-                    if (mapping->last_updated + nat->icmp_query_timeout_interval > curtime) {
+                    if (mapping->last_updated + nat->icmp_query_timeout_interval > currtime) {
                         sr_nat_remove_mapping(nat, mapping, prev_mapping);
                     }
                     break;
@@ -86,12 +86,12 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
                         /* TODO: add state check in conns struct  */
                         if (mapping->conns) {
                             /* TCP Established Idle Timeout */
-                            if (mapping->last_updated + nat->tcp_established_idle_timeout > curtime) {
+                            if (mapping->last_updated + nat->tcp_established_idle_timeout > currtime) {
                                 sr_nat_remove_mapping(nat, mapping, prev_mapping);
                             }
                         } else {
                             /* TCP Transitory Idle Timeout */
-                            if (mapping->last_updated + nat->tcp_transitory_idle_timeout > curtime) {
+                            if (mapping->last_updated + nat->tcp_transitory_idle_timeout > currtime) {
                                 sr_nat_remove_mapping(nat, mapping, prev_mapping);
                             }
                         }
@@ -116,14 +116,22 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 /* Custom: Removes a mapping from the linked list */
 void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping) {
     pthread_mutex_lock(&(nat->lock));
+
     if (!prev_mapping) {
-        /* mapping was the head */
+        /* current mapping is the head of linked list */
         nat->mappings = mapping->next;
     } else {
         prev_mapping->next = mapping->next;
-
-        /* TODO: free mapping */
     }
+
+    struct sr_nat_connection *conn = mapping->conns;
+    while (conn) {
+        free(conn);
+        conn = conn->next;
+    }
+
+    free(mapping);
+
     pthread_mutex_unlock(&(nat->lock));
 }
 
@@ -187,8 +195,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
     /* See if it already exists */
     struct sr_nat_mapping *mapping = sr_nat_lookup_internal(nat, ip_int, aux_int, type);
-    if (mapping)
-    {
+    if (mapping) {
         return mapping;
     }
 
@@ -224,7 +231,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
     nat->mappings = mapping;
 
     /* Make a copy for thread safety */
-    struct sr_nat_mapping *copy = (struct sr_nat_mapping *)malloc(sizeof(struct sr_nat_mapping));
+    struct sr_nat_mapping *copy = (struct sr_nat_mapping *) malloc(sizeof(struct sr_nat_mapping));
     memcpy(copy, mapping, sizeof(struct sr_nat_mapping));
 
 
@@ -234,15 +241,22 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
 /* Custom: finds a connection from a mapping's list */
 struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip) {
+    /* pthread_mutex_lock(&(nat->lock)); */
     struct sr_nat_connection *conn = mapping->conns;
+    struct sr_nat_connection *copy = NULL;
 
+    /* traverse connections */
     while (conn) {
         if (conn->ip == ip) {
-            return conn;
+            copy = (struct sr_nat_connection *) malloc(sizeof(struct sr_nat_connection));
+            memcpy(copy, conn, sizeof(struct sr_nat_connection));
+            break;
         }
-
         conn = conn->next;
     }
+
+    /* pthread_mutex_unlock(&(nat->lock)); */
+    return copy;
 
     return NULL;
 }
@@ -269,7 +283,7 @@ void sr_nat_remove_conn(struct sr_nat *nat, struct sr_nat_mapping *mapping, stru
     pthread_mutex_lock(&(nat->lock));
 
     if (!prev_conn) {
-        /* conn was the head */
+        /* head of linked list */
         mapping->conns = conn->next;
     } else {
         prev_conn->next = conn->next;

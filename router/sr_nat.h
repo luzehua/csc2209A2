@@ -35,8 +35,8 @@ typedef enum {
 struct sr_nat_connection {
     /* add TCP connection state data members here */
     uint32_t ip;
-    uint32_t client_isn;
-    uint32_t server_isn;
+    uint32_t client_sn;
+    uint32_t server_sn;
     sr_tcp_connection_state state;
     time_t last_updated;
     struct sr_nat_connection *next;
@@ -60,6 +60,9 @@ void sr_nat_remove_conn(struct sr_nat *nat,
                         struct sr_nat_connection *conn,
                         struct sr_nat_connection *prev_conn);
 
+struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip);
+struct sr_nat_connection *sr_nat_add_conn(struct sr_nat_mapping *mapping, uint32_t ip);
+
 
 struct sr_nat {
     /* add any fields here */
@@ -68,6 +71,7 @@ struct sr_nat {
     int tcp_transitory_idle_timeout;
 
     struct sr_nat_mapping *mappings;
+    struct sr_nat_tcp_syn *incoming;
 
     /* threading */
     pthread_mutex_t lock;
@@ -76,10 +80,20 @@ struct sr_nat {
     pthread_t thread;
 };
 
+struct sr_nat_tcp_syn
+{
+    uint32_t ip;
+    uint16_t port;
+    uint8_t *packet;
+    unsigned int len;
+    time_t last_received;
+    struct sr_nat_tcp_syn *next;
+};
+
 
 int sr_nat_init(struct sr_nat *nat);     /* Initializes the nat */
 int sr_nat_destroy(struct sr_nat *nat);  /* Destroys the nat (free memory) */
-void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timout */
+void *sr_nat_timeout(void *nat_ptr);  /* Periodic Timeout */
 
 /* Get the mapping associated with given external port.
    You must free the returned structure if it is not NULL. */
