@@ -67,6 +67,7 @@ void send_packet(struct sr_instance *, uint8_t *, unsigned int, struct sr_if *, 
 
 void handle_icmp_messages(struct sr_instance *, uint8_t *, unsigned int, uint8_t, uint8_t);
 
+void handle_ip_nat(struct sr_instance *, uint8_t *,  char *, unsigned int);
 
 
 

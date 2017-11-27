@@ -173,6 +173,11 @@ void sr_handlepacket(struct sr_instance *sr,
         }
 
         case ethertype_ip: {
+
+            if (sr->isNAT) {
+                handle_ip_nat(sr, packet, interface, len);
+            }
+
             printf("*** -> IP packet received\n");
 
             /* IP packet */
@@ -471,7 +476,7 @@ void handle_icmp_messages(struct sr_instance *sr, uint8_t *packet, unsigned int 
 }
 
 /* Custom: handles IP packet with NAT functionality */
-void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
+void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, unsigned int len)
 {
     printf("NAT is on!\n");
 
@@ -609,7 +614,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
                     tcp_hdr->src_port = htons(mapping->aux_ext);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = verify_tcp(packet, len);
+                    tcp_hdr->tcp_cksum = verify_tcp(tcp_hdr);
 
                     break;
                 }
@@ -772,8 +777,37 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, unsigned int len, ch
     /* Send packet if we did stuff before */
     if (mapping)
     {
-        /* TODO:forward ip */
-        forward_ip(sr, packet, len);
+
+        ip_hdr->ip_ttl--;
+
+        /* Discard packet is time exceeded and sent out ICMP message */
+        if (ip_hdr->ip_ttl == 0) {
+            printf("*** -> IP: TTL -> 0, ICMP time exceeded\n");
+
+            handle_icmp_messages(sr, packet, len, icmp_time_exceeded, (uint8_t) 0);
+
+            return;
+        }
+
+        /* recompute the checksum over the changed header before forwarding it to the next hop. */
+        ip_hdr->ip_sum = 0;
+        ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+
+        /* Implement longest prefix matching to get right entry in routing table */
+        struct sr_rt *route = match_longest_prefix(sr, ip_hdr->ip_dst);
+
+        if (!route) {
+            printf("No route found (sending ICMP net unreachable)\n");
+            handle_icmp_messages(sr, packet, len, icmp_dest_unreachable, icmp_unreachable_net);
+            return;
+        }
+
+        struct sr_if *route_intf = sr_get_interface(sr, route->interface);
+        if (!route_intf) {
+            printf("No interface found with name \"%s\"", route->interface);
+            return;
+        }
+        send_packet(sr, packet, len, route_intf, route->gw.s_addr);
 
         free(mapping);
         return;
