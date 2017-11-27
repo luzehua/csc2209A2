@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <assert.h>
 #include "sr_nat.h"
+#include "sr_router.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -30,7 +31,7 @@ int sr_nat_init(struct sr_nat *nat) { /* Initializes the nat */
 
     nat->mappings = NULL;
     /* Initialize any variables here */
-    nat->incoming = NULL;
+    nat->incoming_SYNs = NULL;
 
     next_tcp_port = MIN_NAT_PORT;
     next_icmp_port = MIN_NAT_PORT;
@@ -66,6 +67,34 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         time_t currtime = time(NULL);
 
         /* handle periodic tasks here */
+
+        /* Handle inbound SYNs */
+        struct sr_nat_tcp_syn *prev_inbound = NULL;
+        struct sr_nat_tcp_syn *curr_inbound = nat->incoming_SYNs;
+        while(curr_inbound) {
+            /* do not respond to unsolicited inbound SYN packet for at least 6 seconds */
+            if(difftime(currtime, curr_inbound->last_received) > 6) {
+                struct sr_nat_mapping *mapping = sr_nat_lookup_external(nat, curr_inbound->port, nat_mapping_tcp);
+                if(!mapping) {
+                    handle_icmp_messages(nat->sr, curr_inbound->packet, curr_inbound->len, icmp_dest_unreachable, icmp_unreachable_port);
+                }
+
+                /* remove the syn */
+                if(prev_inbound) { /* not linked list head */
+                    prev_inbound->next = curr_inbound->next;
+                } else { /* head */
+                    nat->incoming_SYNs = curr_inbound->next;
+                }
+
+                free(curr_inbound->packet);
+                free(curr_inbound);
+            } else {
+                prev_inbound = curr_inbound;
+                curr_inbound = curr_inbound->next;
+            }
+        }
+
+
         /* Remove timed out mappings */
         struct sr_nat_mapping *prev_mapping = NULL;
         struct sr_nat_mapping *mapping = nat->mappings;
@@ -73,7 +102,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
             switch (mapping->type) {
                 case nat_mapping_icmp: {
                     /* ICMP query timeout */
-                    if (mapping->last_updated + nat->icmp_query_timeout_interval > currtime) {
+                    if (mapping->last_updated + nat->icmp_query_timeout_interval < currtime) {
                         sr_nat_remove_mapping(nat, mapping, prev_mapping);
                     }
                     break;
@@ -81,23 +110,44 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 
                 case nat_mapping_tcp: {
 
+                    struct sr_nat_connection *prev = NULL; /* Used to remove element in Linked list*/
                     struct sr_nat_connection *conn = mapping->conns;
+
                     while (conn) {
                         /* TODO: add state check in conns struct  */
-                        if (mapping->conns) {
-                            /* TCP Established Idle Timeout */
-                            if (mapping->last_updated + nat->tcp_established_idle_timeout > currtime) {
-                                sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                        switch(conn->state) {
+                            case tcp_state_syn_sent:
+                            case tcp_state_syn_received:
+                            case tcp_state_last_ack:
+                            case tcp_state_closing:
+                            {
+                                /* TCP Transitory Idle Timeout */
+                                if (mapping->last_updated + nat->tcp_transitory_idle_timeout > currtime) {
+                                    sr_nat_remove_conn(nat, mapping, conn, prev);
+                                }
+                                break;
                             }
-                        } else {
-                            /* TCP Transitory Idle Timeout */
-                            if (mapping->last_updated + nat->tcp_transitory_idle_timeout > currtime) {
-                                sr_nat_remove_mapping(nat, mapping, prev_mapping);
+                            case tcp_state_established:
+                            case tcp_state_fin_wait_1:
+                            case tcp_state_fin_wait_2:
+                            case tcp_state_close_wait:
+                            {
+                                /* TCP Established Idle Timeout */
+                                if (mapping->last_updated + nat->tcp_established_idle_timeout > currtime) {
+                                    sr_nat_remove_conn(nat, mapping, conn, prev);
+                                }
+                                break;
+                            }
+                            default: {
+                                break;
                             }
                         }
 
-
+                        prev = conn;
+                        conn = conn->next;
                     }
+
+                    sr_nat_remove_mapping(nat, mapping, prev_mapping);
 
                     break;
                 }
@@ -118,7 +168,7 @@ void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uin
 
     pthread_mutex_lock(&(nat->lock));
 
-    struct sr_nat_tcp_syn *cur_inbound = nat->incoming;
+    struct sr_nat_tcp_syn *cur_inbound = nat->incoming_SYNs;
 
     /* traverse all cur_inbound SYNs */
     while(cur_inbound) {
@@ -140,8 +190,8 @@ void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uin
 
     /* Add as the head of cur_inbound list */
     /* avoid the corner case when linked list is empty */
-    cur_inbound->next = nat->incoming;
-    nat->incoming = cur_inbound;
+    cur_inbound->next = nat->incoming_SYNs;
+    nat->incoming_SYNs = cur_inbound;
 
     pthread_mutex_unlock;
 }

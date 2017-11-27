@@ -71,7 +71,8 @@ struct sr_nat {
     int tcp_transitory_idle_timeout;
 
     struct sr_nat_mapping *mappings;
-    struct sr_nat_tcp_syn *incoming;
+    struct sr_nat_tcp_syn *incoming_SYNs;
+    struct sr_instance *sr;
 
     /* threading */
     pthread_mutex_t lock;
@@ -109,6 +110,8 @@ struct sr_nat_mapping *sr_nat_lookup_internal(struct sr_nat *nat,
    You must free the returned structure if it is not NULL. */
 struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
                                              uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type);
+
+void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uint8_t *packet, unsigned int len);
 
 
 #endif
