@@ -491,10 +491,9 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
         printf("***IP NAT: packet from internal interface\n");
 
         /* Check if destined for one of the router's interfaces */
-        struct sr_if *dest_is_router = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
+        struct sr_if *destination = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
 
-        //TODO: verify the icmp message when a internal message sent router.
-        if (dest_is_router)
+        if (destination)
         {
             handle_icmp_messages(sr, packet, len, icmp_dest_unreachable, icmp_unreachable_port);
         }
@@ -572,7 +571,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                             /* ESTAB -> CLOSED (ACK of FIN) */
                             if (tcp_hdr->fin && tcp_hdr->ack)
                             {
-                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->client_sn = ntohl(tcp_hdr->seqnum);
                                 conn->state = tcp_state_closed;
                             }
                             break;
@@ -581,9 +580,9 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                         case tcp_state_closed:
                         {
                             /* CLOSED -> SYN_SENT */
-                            if (!tcp_hdr->ack && tcp_hdr->syn && ntohl(tcp_hdr->ack) == 0)
+                            if (!tcp_hdr->ack && tcp_hdr->syn && ntohl(tcp_hdr->acknum) == 0)
                             {
-                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->client_sn = ntohl(tcp_hdr->seqnum);
                                 conn->state = tcp_state_syn_sent;
                             }
                             break;
@@ -592,9 +591,9 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                         case tcp_state_syn_received:
                         {
                             /* SYN_RCVD -> ESTAB (ACK of SYN) */
-                            if (!tcp_hdr->syn && ntohl(tcp_hdr->seq) == conn->client_sn + 1 && ntohl(tcp_hdr->ack) == conn->server_sn + 1)
+                            if (!tcp_hdr->syn && ntohl(tcp_hdr->seqnum) == conn->client_sn + 1 && ntohl(tcp_hdr->acknum) == conn->server_sn + 1)
                             {
-                                conn->client_sn = ntohl(tcp_hdr->seq);
+                                conn->client_sn = ntohl(tcp_hdr->seqnum);
                                 conn->state = tcp_state_established;
                             }
 
@@ -632,9 +631,9 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
         printf("IP NAT external: external interface\n");
 
         /* Check if destined for one of the router's interfaces */
-        struct sr_if *dest = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
+        struct sr_if *destination = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
 
-        if (dest)
+        if (destination)
         {
             /* Inbound message */
             printf("IP NAT external: inbound message\n");
@@ -722,16 +721,16 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                             /* SYN_SENT -> SYN_RECV */
                             if (tcp_hdr->syn)
                             {
-                                if (tcp_hdr->ack && ntohl(tcp_hdr->ack) == conn->client_sn + 1)
+                                if (tcp_hdr->ack && ntohl(tcp_hdr->acknum) == conn->client_sn + 1)
                                 {
                                     /* Simultaneous open */
-                                    conn->server_sn = ntohl(tcp_hdr->seq);
+                                    conn->server_sn = ntohl(tcp_hdr->seqnum);
                                     conn->state = tcp_state_syn_received;
                                 }
-                                else if (!tcp_hdr->ack && ntohl(tcp_hdr->ack) == 0)
+                                else if (!tcp_hdr->ack && ntohl(tcp_hdr->acknum) == 0)
                                 {
-                                    /* SYN + initial seq num of 0 */
-                                    conn->server_sn = ntohl(tcp_hdr->seq);
+                                    /* SYN + initial seqnum num of 0 */
+                                    conn->server_sn = ntohl(tcp_hdr->seqnum);
                                     conn->state = tcp_state_syn_received;
                                 }
                             }

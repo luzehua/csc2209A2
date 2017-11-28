@@ -197,8 +197,8 @@ struct sr_tcp_hdr
 {
     uint16_t src_port;
     uint16_t dest_port;
-    uint32_t seq;
-    uint32_t ack;
+    uint32_t seqnum;
+    uint32_t acknum;
     uint8_t offset;
     /* uint8_t flags;       CWR, ECE, URG, ACK, PSH, RST, SYN, FIN */
 #if __BYTE_ORDER == __BIG_ENDIAN
