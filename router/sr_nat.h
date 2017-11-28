@@ -53,15 +53,7 @@ struct sr_nat_mapping {
     struct sr_nat_mapping *next;
 };
 
-void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping);
 
-void sr_nat_remove_conn(struct sr_nat *nat,
-                        struct sr_nat_mapping *mapping,
-                        struct sr_nat_connection *conn,
-                        struct sr_nat_connection *prev_conn);
-
-struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip);
-struct sr_nat_connection *sr_nat_add_conn(struct sr_nat_mapping *mapping, uint32_t ip);
 
 
 struct sr_nat {
@@ -81,8 +73,7 @@ struct sr_nat {
     pthread_t thread;
 };
 
-struct sr_nat_tcp_syn
-{
+struct sr_nat_tcp_syn {
     uint32_t ip;
     uint16_t port;
     uint8_t *packet;
@@ -112,6 +103,15 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
                                              uint32_t ip_int, uint16_t aux_int, sr_nat_mapping_type type);
 
 void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uint8_t *packet, unsigned int len);
+
+void sr_nat_remove_mapping(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_mapping *prev_mapping);
+
+struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip);
+
+struct sr_nat_connection *sr_nat_add_conn(struct sr_nat_mapping *mapping, uint32_t ip);
+
+void sr_nat_remove_conn(struct sr_nat *nat, struct sr_nat_mapping *mapping, struct sr_nat_connection *conn,
+                        struct sr_nat_connection *prev_conn);
 
 
 #endif
