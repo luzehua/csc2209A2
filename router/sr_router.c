@@ -176,6 +176,7 @@ void sr_handlepacket(struct sr_instance *sr,
 
             if (sr->isNAT) {
                 handle_ip_nat(sr, packet, interface, len);
+                break;
             }
 
             printf("*** -> IP packet received\n");
