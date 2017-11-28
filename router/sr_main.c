@@ -41,7 +41,6 @@ extern char *optarg;
 #define DEFAULT_ICMP_QUERY_TIMEOUT 60
 #define DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT 7440
 #define DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT 300
-#define DEFAULT_NAT 0
 
 #define VERSION_INFO "VNS sr stub code revised 2009-10-14 (rev 0.20)"
 #define DEFAULT_PORT 8888
@@ -67,7 +66,7 @@ int main(int argc, char **argv) {
     int icmp_query_timeout_interval = DEFAULT_ICMP_QUERY_TIMEOUT;
     int tcp_established_idle_timeout = DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT;
     int tcp_transitory_idle_timeout = DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT;
-    int isNAT = DEFAULT_NAT;
+    int isNAT = 0;
 
     int c;
     char *host = DEFAULT_HOST;
@@ -132,7 +131,9 @@ int main(int argc, char **argv) {
     sr_init_instance(&sr);
 
     /* set up NAT default config */
-
+    printf("***NAT start :%d\n", isNAT);
+    sr.isNAT = isNAT;
+    sr.nat.sr = &sr;
     sr.nat.icmp_query_timeout_interval = icmp_query_timeout_interval;
     sr.nat.tcp_established_idle_timeout = tcp_established_idle_timeout;
     sr.nat.tcp_transitory_idle_timeout = tcp_transitory_idle_timeout;
@@ -203,7 +204,7 @@ static void usage(char *argv0) {
     printf("           [-l log file] \n");
     printf("   defaults server=%s port=%d host=%s\n   "
                    "isNAT=%d ICMP timeout interval=%d TCP establish timeout=%d TCP transitory idle timeout=%d\n",
-           DEFAULT_SERVER, DEFAULT_PORT, DEFAULT_HOST, DEFAULT_NAT,
+           DEFAULT_SERVER, DEFAULT_PORT, DEFAULT_HOST, 0,
            DEFAULT_ICMP_QUERY_TIMEOUT, DEFAULT_TCP_ESTABLISHED_IDLE_TIMEOUT, DEFAULT_TCP_TRANSITORY_IDLE_TIMEOUT);
 } /* -- usage -- */
 
