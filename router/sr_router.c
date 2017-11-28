@@ -512,11 +512,12 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     printf("***IP NAT internal: ICMP message\n");
 
                     /* Verify ICMP header */
+                    /*
                     if (verify_icmp_packet(packet, len) == -1)
                     {
                         return;
                     }
-
+                     */
                     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Find NAT mapping based on ICMP id and IP source address */
@@ -646,10 +647,12 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     printf("IP NAT external: ICMP message\n");
 
                     /* Verify ICMP header */
+                    /*
                     if (verify_icmp_packet(packet, len) == -1)
                     {
                         return;
                     }
+                     */
 
                     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
