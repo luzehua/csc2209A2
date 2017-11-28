@@ -519,7 +519,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
 
                     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
-                    /* Find NAT mapping based on ICMP id */
+                    /* Find NAT mapping based on ICMP id and IP source address */
                     mapping = sr_nat_lookup_internal(&(sr->nat), ip_hdr->ip_src, icmp_hdr->icmp_id, nat_mapping_icmp);
                     if (!mapping)
                     {
@@ -528,7 +528,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                         mapping->last_updated = time(NULL);
                     }
 
-                    /* Update ICMP header with mapping's ID */
+                    /* Set ICMP id with mapping's external port number and updata chksum */
                     icmp_hdr->icmp_id = mapping->aux_ext;
                     icmp_hdr->icmp_sum = 0;
                     icmp_hdr->icmp_sum = cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
@@ -548,7 +548,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                         return;
                     }
 
-                    /* Find NAT mapping based on TCP source port */
+                    /* Find NAT mapping based on TCP source port and IP source address */
                     mapping = sr_nat_lookup_internal(&(sr->nat), ip_hdr->ip_src, ntohs(tcp_hdr->src_port), nat_mapping_tcp);
                     if (!mapping)
                     {
@@ -774,7 +774,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
         ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
     }
 
-    /* Send packet if we did stuff before */
+    /* Send packet */
     if (mapping)
     {
 
