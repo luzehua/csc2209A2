@@ -543,7 +543,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(tcp_hdr, len) == -1)
+                    if (verify_tcp(packet, len) == -1)
                     {
                         return;
                     }
@@ -682,7 +682,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(tcp_hdr, len) == -1)
+                    if (verify_tcp(packet, len) == -1)
                     {
                         return;
                     }
