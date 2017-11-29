@@ -322,29 +322,6 @@ int verify_tcp(sr_tcp_hdr_t *header)
     return 0;
 }
 
-/* Custom method: calculate new TCP checksum */
-uint16_t tcp_hdr_cksum(void *packet, unsigned int len) {
-    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
-    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-
-    int tcp_len = len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t);
-    int new_tcp_len = sizeof(sr_construct_tcp_hdr_t) + tcp_len;
-
-    /* construct pseudo TCP header */
-    sr_construct_tcp_hdr_t *new_tcp_hdr = (sr_construct_tcp_hdr_t *) malloc(new_tcp_len);
-    new_tcp_hdr->ip_src = ip_hdr->ip_src;
-    new_tcp_hdr->ip_dst = ip_hdr->ip_dst;
-    new_tcp_hdr->reserved = 0;
-    new_tcp_hdr->ip_p = ip_protocol_tcp;
-    new_tcp_hdr->tcp_len = htons(tcp_len);
-    memcpy((uint8_t *) new_tcp_hdr + sizeof(sr_construct_tcp_hdr_t), (uint8_t *) tcp_hdr, tcp_len)sr_construct_tcp_hdr_t;
-
-    /* calculate checksum */
-    uint16_t checksum = cksum(new_tcp_hdr, new_tcp_len);
-
-    free(new_tcp_hdr);
-    return checksum;
-}
 
 int verify_icmp_packet(uint8_t *payload, unsigned int len) {
     sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) payload;
@@ -594,7 +571,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     {
                         case tcp_state_established:
                         {
-                            /* ESTAB -> CLOSED (ACK of FIN) */
+                            /* close the connection if ACK of FIN */
                             if (tcp_hdr->fin && tcp_hdr->ack)
                             {
                                 conn->client_sn = ntohl(tcp_hdr->seqnum);
@@ -605,7 +582,9 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
 
                         case tcp_state_closed:
                         {
-                            /* CLOSED -> SYN_SENT */
+                            /* the first step of 3-way handshake
+                             * SYN is sent but no ACK yet
+                             */
                             if (!tcp_hdr->ack && tcp_hdr->syn && ntohl(tcp_hdr->acknum) == 0)
                             {
                                 conn->client_sn = ntohl(tcp_hdr->seqnum);
@@ -616,8 +595,10 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
 
                         case tcp_state_syn_received:
                         {
-                            /* SYN_RCVD -> ESTAB (ACK of SYN) */
-                            if (!tcp_hdr->syn && ntohl(tcp_hdr->seqnum) == conn->client_sn + 1 && ntohl(tcp_hdr->acknum) == conn->server_sn + 1)
+                            /* The third step if 3-way hadshake
+                             * if SYN is received,
+                             * connection establish */
+                            if (!tcp_hdr->syn && tcp_hdr->ack && ntohl(tcp_hdr->seqnum) == conn->client_sn + 1 && ntohl(tcp_hdr->acknum) == conn->server_sn + 1)
                             {
                                 conn->client_sn = ntohl(tcp_hdr->seqnum);
                                 conn->state = tcp_state_established;
@@ -639,7 +620,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     tcp_hdr->src_port = htons(mapping->aux_ext);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = tcp_hdr_cksum(packet, len);
+                    tcp_hdr->tcp_cksum = tcp_checksum(packet, len);
 
                     break;
                 }
@@ -654,7 +635,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
     else if (strncmp(interface, NAT_EXT_INTF, sr_IFACE_NAMELEN) == 0)
     {
         /* External -> internal */
-        printf("IP NAT external: external interface\n");
+        printf("***Packet coming from external \n");
 
         /* Check if destined for one of the router's interfaces */
         struct sr_if *destination = sr_get_interface_by_ipaddr(sr, ip_hdr->ip_dst);
@@ -662,13 +643,13 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
         if (destination)
         {
             /* Inbound message */
-            printf("IP NAT external: inbound message\n");
+            printf("  NAT external: inbound message to this router\n");
 
             switch (ip_hdr->ip_p)
             {
                 case ip_protocol_icmp:
                 {
-                    printf("IP NAT external: ICMP message\n");
+                    printf("  NAT external: ICMP message\n");
 
                     /* Verify ICMP header */
                     /*
@@ -684,7 +665,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     mapping = sr_nat_lookup_external(&(sr->nat), icmp_hdr->icmp_id, nat_mapping_icmp);
                     if (!mapping)
                     {
-                        printf("IP NAT external: can't find ICMP mapping, dropping\n");
+                        printf("   NAT external: can't find ICMP mapping, dropping\n");
                         return;
                     }
 
@@ -698,7 +679,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
 
                 case ip_protocol_tcp:
                 {
-                    printf("IP NAT external: TCP message\n");
+                    printf("   NAT external: TCP message\n");
 
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
@@ -711,26 +692,27 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     /* Restricted ports */
                     if (ntohs(tcp_hdr->dest_port) < MIN_NAT_PORT)
                     {
-                        printf("IP NAT external: restricted TCP port, dropping\n");
+                        printf("   Error: NAT external: Invalid TCP port\n");
                         handle_icmp_messages(sr, packet, len, icmp_dest_unreachable, icmp_unreachable_port);
                         return;
                     }
 
                     /* Find NAT mapping based on TCP destination port */
                     mapping = sr_nat_lookup_external(&(sr->nat), ntohs(tcp_hdr->dest_port), nat_mapping_tcp);
+
                     if (!mapping)
                     {
                         /* Add new SYN if it's a valid route */
                         if (tcp_hdr->syn)
                         {
-                            struct sr_rt *rt = (struct sr_rt *)match_longest_prefix(sr, ip_hdr->ip_dst);
-                            if (rt)
+                            struct sr_rt *entry = (struct sr_rt *)match_longest_prefix(sr, ip_hdr->ip_dst);
+                            if (entry)
                             {
                                 add_inbound_syn(&sr->nat, ip_hdr->ip_src, tcp_hdr->dest_port, packet, len);
                             }
                         }
 
-                        printf("IP NAT external: can't find TCP mapping, dropping\n");
+                        printf("   Error: NAT external: Can't find valid TCP mapping \n");
                         return;
                     }
 
@@ -746,9 +728,10 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     {
                         case tcp_state_syn_sent:
                         {
-                            /* SYN_SENT -> SYN_RECV */
                             if (tcp_hdr->syn)
                             {
+                                /* The second step of 3-way-handshake
+                                 * if ACK & SYN, change state to SYN received */
                                 if (tcp_hdr->ack && ntohl(tcp_hdr->acknum) == conn->client_sn + 1)
                                 {
                                     /* Simultaneous open */
@@ -761,6 +744,8 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                                     conn->server_sn = ntohl(tcp_hdr->seqnum);
                                     conn->state = tcp_state_syn_received;
                                 }
+                                add_inbound_syn(&(sr->nat), ip_hdr->ip_src, tcp_hdr->src_port, packet, len);
+
                             }
                             break;
                         }
@@ -783,7 +768,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     tcp_hdr->dest_port = htons(mapping->aux_int);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = tcp_hdr_cksum(packet, len);
+                    tcp_hdr->tcp_cksum = tcp_checksum(packet, len);
 
                     break;
                 }
@@ -791,7 +776,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
         }
         else
         {
-            printf("IP NAT external: not destined for router, dropping\n");
+            printf("   NAT external: Not destined to router\n");
             return;
         }
 

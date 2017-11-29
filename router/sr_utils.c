@@ -19,6 +19,30 @@ uint16_t cksum(const void *_data, int len) {
     return sum ? sum : 0xffff;
 }
 
+uint16_t tcp_checksum(void *packet, unsigned int len)
+{
+    int tcp_len = len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t);
+    int pseudo_len = sizeof(sr_tcp_pseudo_hdr_t) + tcp_len;
+
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+    /* Create pseudo-header (pseudo-header + original TCP headers) */
+    sr_tcp_pseudo_hdr_t *pseudo = (sr_tcp_pseudo_hdr_t *)malloc(sizeof(sr_tcp_pseudo_hdr_t) + tcp_len);
+    pseudo->ip_src = ip_hdr->ip_src;
+    pseudo->ip_dst = ip_hdr->ip_dst;
+    pseudo->reserved = 0;
+    pseudo->ip_p = ip_protocol_tcp;
+    pseudo->tcp_len = htons(tcp_len);
+    memcpy((uint8_t *)pseudo + sizeof(sr_tcp_pseudo_hdr_t), (uint8_t *)tcp_hdr, tcp_len);
+
+    /* Compute checksum */
+    uint16_t new_cksum = cksum(pseudo, pseudo_len);
+
+    free(pseudo);
+    return new_cksum;
+}
+
 
 
 uint16_t ethertype(uint8_t *buf) {

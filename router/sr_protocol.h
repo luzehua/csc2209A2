@@ -192,6 +192,16 @@ struct sr_arp_hdr {
 } __attribute__((packed));
 typedef struct sr_arp_hdr sr_arp_hdr_t;
 
+struct sr_tcp_pseudo_hdr
+{
+    uint32_t ip_src;
+    uint32_t ip_dst;
+    uint8_t reserved;
+    uint8_t ip_p;
+    uint16_t tcp_len;
+} __attribute__((packed));
+typedef struct sr_tcp_pseudo_hdr sr_tcp_pseudo_hdr_t;
+
 /* Custom: TCP header */
 struct sr_tcp_hdr
 {
@@ -200,7 +210,6 @@ struct sr_tcp_hdr
     uint32_t seqnum;
     uint32_t acknum;
     uint8_t offset;
-    /* uint8_t flags;       CWR, ECE, URG, ACK, PSH, RST, SYN, FIN */
 #if __BYTE_ORDER == __BIG_ENDIAN
     unsigned int cwr : 1; /* CWR */
     unsigned int ece : 1; /* ECE */
@@ -227,14 +236,7 @@ struct sr_tcp_hdr
 } __attribute__((packed));
 typedef struct sr_tcp_hdr sr_tcp_hdr_t;
 
-struct sr_construct_tcp_hdr {
-    uint32_t ip_src;
-    uint32_t ip_dst;
-    uint8_t reserved;
-    uint8_t ip_p;
-    uint16_t tcp_len;
-} __attribute__ ((packed));
-typedef struct sr_construct_tcp_hdr sr_construct_tcp_hdr_t;
+
 
 #define sr_IFACE_NAMELEN 32
 

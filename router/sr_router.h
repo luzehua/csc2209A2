@@ -63,7 +63,6 @@ int verify_ip_packet(sr_ip_hdr_t *);
 
 int verify_icmp_packet(uint8_t *, unsigned int);
 
-uint16_t tcp_hdr_cksum(void* packet, unsigned int len);
 
 
 void send_packet(struct sr_instance *, uint8_t *, unsigned int, struct sr_if *, uint32_t);
