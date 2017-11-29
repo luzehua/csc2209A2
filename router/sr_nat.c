@@ -183,7 +183,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 /* Custom: add the inbound TCP SYN connection */
 void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uint8_t *packet, unsigned int len) {
 
-    pthread_mutex_lock(&(nat->lock));
+    /* pthread_mutex_lock(&(nat->lock)); */
 
     struct sr_nat_tcp_syn *cur_inbound = nat->incoming_SYNs;
 
@@ -210,7 +210,7 @@ void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uin
     cur_inbound->next = nat->incoming_SYNs;
     nat->incoming_SYNs = cur_inbound;
 
-    pthread_mutex_unlock;
+    /* pthread_mutex_unlock(&(nat->lock)); */
 }
 
 /* Custom: Removes a mapping from the linked list */
@@ -343,7 +343,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
 /* Custom: finds a connection from a mapping's list */
 struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip) {
-    
+
     struct sr_nat_connection *conn = mapping->conns;
     struct sr_nat_connection *copy = NULL;
 
