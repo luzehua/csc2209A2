@@ -292,30 +292,23 @@ int verify_ip_packet(sr_ip_hdr_t *headers) {
 }
 
 /* Custom method: verify TCP headers */
-int verify_tcp(sr_tcp_hdr_t *header)
-{
-    /* Minimum size */
-    if (header->offset < 5)
-    {
-        printf("TCP: insufficient header length\n");
+int verify_tcp(uint8_t *packet, unsigned int len) {
+    uint8_t *payload = (packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)payload;
+
+    /* verify the length of header */
+    if(tcp_hdr->offset < 5) {
+        printf("Error: verify_tcp: header too short.\n");
         return -1;
     }
 
-    /* Maximum size */
-    if (header->offset > 15)
-    {
-        printf("TCP: header length too large\n");
-        return -1;
-    }
-
-    /* Verify TCP checksum */
-    uint16_t old_cksum = header->tcp_cksum;
-    header->tcp_cksum = 0;
-    uint16_t new_cksum = cksum(header, header->offset * 4);
-    header->tcp_cksum = old_cksum;
-    if (old_cksum != new_cksum)
-    {
-        printf("TCP: checksum didn't match\n");
+    /* verify the checksum */
+    uint16_t received_checksum = tcp_hdr->tcp_cksum;
+    tcp_hdr->tcp_cksum = 0;
+    uint16_t true_checksum = tcp_checksum(packet, len);
+    tcp_hdr->tcp_cksum = received_checksum;
+    if(received_checksum != true_checksum) {
+        printf("Error: verify_tcp: checksum didn't match.\n");
         return -1;
     }
 
@@ -324,6 +317,7 @@ int verify_tcp(sr_tcp_hdr_t *header)
 
 
 int verify_icmp_packet(uint8_t *payload, unsigned int len) {
+
     sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) payload;
 
     /* Verify header length is valid */
@@ -485,6 +479,10 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
     uint8_t *payload = (packet + sizeof(sr_ethernet_hdr_t));
     sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)payload;
 
+    if(verify_ip_packet(ip_hdr) == -1) {
+        return;
+    }
+
     struct sr_nat_mapping *mapping = NULL;
 
     if (strncmp(interface, NAT_INT_INTF, sr_IFACE_NAMELEN) == 0)
@@ -513,12 +511,12 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     printf("***IP NAT internal: ICMP message\n");
 
                     /* Verify ICMP header */
-                    /*
-                    if (verify_icmp_packet(packet, len) == -1)
+
+                    if (verify_icmp_packet(payload, len) == -1)
                     {
                         return;
                     }
-                     */
+
                     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Find NAT mapping based on ICMP id and IP source address */
@@ -545,7 +543,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(tcp_hdr) == -1)
+                    if (verify_tcp(tcp_hdr, len) == -1)
                     {
                         return;
                     }
@@ -652,12 +650,12 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     printf("  NAT external: ICMP message\n");
 
                     /* Verify ICMP header */
-                    /*
-                    if (verify_icmp_packet(packet, len) == -1)
+
+                    if (verify_icmp_packet(payload, len) == -1)
                     {
                         return;
                     }
-                     */
+
 
                     sr_icmp_hdr_t *icmp_hdr = (sr_icmp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
@@ -684,7 +682,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
 
                     /* Verify TCP header */
-                    if (verify_tcp(tcp_hdr) == -1)
+                    if (verify_tcp(tcp_hdr, len) == -1)
                     {
                         return;
                     }
