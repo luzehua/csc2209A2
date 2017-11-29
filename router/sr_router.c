@@ -285,7 +285,7 @@ int verify_ip_packet(sr_ip_hdr_t *headers) {
     uint16_t new_cksum = cksum(headers, sizeof(sr_ip_hdr_t));
     headers->ip_sum = old_cksum;
     if (old_cksum != new_cksum) {
-        printf("IP: checksum didn't match\n");
+        printf("*** -> IP: checksum didn't match\n");
         return -1;
     }
     return 0;
@@ -294,21 +294,21 @@ int verify_ip_packet(sr_ip_hdr_t *headers) {
 /* Custom method: verify TCP headers */
 int verify_tcp(uint8_t *packet, unsigned int len) {
     uint8_t *payload = (packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t*)payload;
+    sr_tcp_hdr_t *header = (sr_tcp_hdr_t*)payload;
 
     /* verify the length of header */
-    if(tcp_hdr->offset < 5) {
-        printf("Error: verify_tcp: header too short.\n");
+    if(header->offset < 5) {
+        printf("*** -> TCP header length invalid .\n");
         return -1;
     }
 
     /* verify the checksum */
-    uint16_t received_checksum = tcp_hdr->tcp_cksum;
-    tcp_hdr->tcp_cksum = 0;
-    uint16_t true_checksum = tcp_checksum(packet, len);
-    tcp_hdr->tcp_cksum = received_checksum;
-    if(received_checksum != true_checksum) {
-        printf("Error: verify_tcp: checksum didn't match.\n");
+    uint16_t receivedChecksum = header->tcp_cksum;
+    header->tcp_cksum = 0;
+    uint16_t newCksum = tcp_checksum(packet, len);
+    header->tcp_cksum = receivedChecksum;
+    if(receivedChecksum != newCksum) {
+        printf("*** -> Tcp: wrong ckecksum.\n");
         return -1;
     }
 
@@ -529,8 +529,8 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     }
 
                     /* Set ICMP id with mapping's external port number and updata chksum */
-                    icmp_hdr->icmp_id = mapping->aux_ext;
                     icmp_hdr->icmp_sum = 0;
+                    icmp_hdr->icmp_id = mapping->aux_ext;
                     icmp_hdr->icmp_sum = cksum(icmp_hdr, len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t));
 
                     break;
@@ -567,17 +567,6 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
 
                     switch (conn->state)
                     {
-                        case tcp_state_established:
-                        {
-                            /* close the connection if ACK of FIN */
-                            if (tcp_hdr->fin && tcp_hdr->ack)
-                            {
-                                conn->client_sn = ntohl(tcp_hdr->seqnum);
-                                conn->state = tcp_state_closed;
-                            }
-                            break;
-                        }
-
                         case tcp_state_closed:
                         {
                             /* the first step of 3-way handshake
@@ -590,6 +579,17 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                             }
                             break;
                         }
+                        case tcp_state_established:
+                        {
+                            /* close the connection if ACK of FIN */
+                            if (tcp_hdr->fin && tcp_hdr->ack)
+                            {
+                                conn->client_sn = ntohl(tcp_hdr->seqnum);
+                                conn->state = tcp_state_closed;
+                            }
+                            break;
+                        }
+
 
                         case tcp_state_syn_received:
                         {

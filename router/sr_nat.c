@@ -108,72 +108,6 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
         }
 
 
-        /* Remove timed out mappings */
-        struct sr_nat_mapping *prev_mapping = NULL;
-        struct sr_nat_mapping *mapping = nat->mappings;
-        while (mapping) {
-            switch (mapping->type) {
-                case nat_mapping_icmp: {
-                    /* ICMP query timeout */
-                    if (mapping->last_updated + nat->icmp_query_timeout_interval < currtime) {
-                        sr_nat_remove_mapping(nat, mapping, prev_mapping);
-                    }
-                    break;
-                }
-
-                case nat_mapping_tcp: {
-
-                    struct sr_nat_connection *prev = NULL; /* Used to remove element in Linked list*/
-                    struct sr_nat_connection *conn = mapping->conns;
-
-                    int flag_remove_mapping = 1;
-                    while (conn) {
-                        /* TODO: add state check in conns struct  */
-                        switch (conn->state) {
-                            case tcp_state_syn_sent:
-                            case tcp_state_syn_received:
-                            case tcp_state_last_ack:
-                            case tcp_state_closing: {
-                                /* TCP Transitory Idle Timeout */
-                                if (mapping->last_updated + nat->tcp_transitory_idle_timeout > currtime) {
-                                    sr_nat_remove_conn(nat, mapping, conn, prev);
-                                } else {
-                                    flag_remove_mapping = 0;
-                                }
-                                break;
-                            }
-                            case tcp_state_established:
-                            case tcp_state_fin_wait_1:
-                            case tcp_state_fin_wait_2:
-                            case tcp_state_close_wait: {
-                                /* TCP Established Idle Timeout */
-                                if (mapping->last_updated + nat->tcp_established_idle_timeout > currtime) {
-                                    sr_nat_remove_conn(nat, mapping, conn, prev);
-                                } else {
-                                    flag_remove_mapping = 0;
-                                }
-                                break;
-                            }
-                            default: {
-                                break;
-                            }
-                        }
-
-                        prev = conn;
-                        conn = conn->next;
-                    }
-                    if (flag_remove_mapping) {
-                        sr_nat_remove_mapping(nat, mapping, prev_mapping);
-                    }
-
-                    break;
-                }
-            }
-
-            prev_mapping = mapping;
-            mapping = mapping->next;
-        }
-
 
         pthread_mutex_unlock(&(nat->lock));
     }
@@ -183,7 +117,7 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
 /* Custom: add the inbound TCP SYN connection */
 void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uint8_t *packet, unsigned int len) {
 
-    /* pthread_mutex_lock(&(nat->lock)); */
+    pthread_mutex_lock(&(nat->lock));
 
     struct sr_nat_tcp_syn *cur_inbound = nat->incoming_SYNs;
 
@@ -210,7 +144,7 @@ void add_inbound_syn(struct sr_nat *nat, uint32_t src_ip, uint16_t src_port, uin
     cur_inbound->next = nat->incoming_SYNs;
     nat->incoming_SYNs = cur_inbound;
 
-    /* pthread_mutex_unlock(&(nat->lock)); */
+    pthread_mutex_unlock(&(nat->lock));
 }
 
 /* Custom: Removes a mapping from the linked list */
