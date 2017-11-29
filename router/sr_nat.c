@@ -52,6 +52,14 @@ int sr_nat_destroy(struct sr_nat *nat) {  /* Destroys the nat (free memory) */
         free(prev_mapping);
     }
 
+    struct sr_nat_tcp_syn *incoming = nat->incoming_SYNs;
+    while (incoming)
+    {
+        struct sr_nat_tcp_syn *prev_incoming = incoming;
+        incoming = incoming->next;
+        free(prev_incoming);
+    }
+
     pthread_kill(nat->thread, SIGKILL);
     return pthread_mutex_destroy(&(nat->lock)) &&
            pthread_mutexattr_destroy(&(nat->attr));
@@ -83,12 +91,16 @@ void *sr_nat_timeout(void *nat_ptr) {  /* Periodic Timout handling */
                 /* remove the syn */
                 if (prev_inbound) { /* not linked list head */
                     prev_inbound->next = curr_inbound->next;
+                    free(curr_inbound->packet);
+                    free(curr_inbound);
+                    curr_inbound = prev_inbound->next;
                 } else { /* head */
                     nat->incoming_SYNs = curr_inbound->next;
+                    free(curr_inbound->packet);
+                    free(curr_inbound);
+                    curr_inbound = nat->incoming_SYNs;
                 }
 
-                free(curr_inbound->packet);
-                free(curr_inbound);
             } else {
                 prev_inbound = curr_inbound;
                 curr_inbound = curr_inbound->next;
@@ -316,6 +328,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
         }
     }
 
+    /* Add new mapping as the head of linked list */
     mapping->next = nat->mappings;
     nat->mappings = mapping;
 
@@ -330,7 +343,7 @@ struct sr_nat_mapping *sr_nat_insert_mapping(struct sr_nat *nat,
 
 /* Custom: finds a connection from a mapping's list */
 struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32_t ip) {
-    /* pthread_mutex_lock(&(nat->lock)); */
+    
     struct sr_nat_connection *conn = mapping->conns;
     struct sr_nat_connection *copy = NULL;
 
@@ -344,7 +357,6 @@ struct sr_nat_connection *sr_nat_get_conn(struct sr_nat_mapping *mapping, uint32
         conn = conn->next;
     }
 
-    /* pthread_mutex_unlock(&(nat->lock)); */
     return copy;
 
     return NULL;
