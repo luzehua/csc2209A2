@@ -322,6 +322,30 @@ int verify_tcp(sr_tcp_hdr_t *header)
     return 0;
 }
 
+/* Custom method: calculate new TCP checksum */
+uint16_t tcp_hdr_cksum(void *packet, unsigned int len) {
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
+    sr_tcp_hdr_t *tcp_hdr = (sr_tcp_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+
+    int tcp_len = len - sizeof(sr_ethernet_hdr_t) - sizeof(sr_ip_hdr_t);
+    int new_tcp_len = sizeof(sr_construct_tcp_hdr_t) + tcp_len;
+
+    /* construct pseudo TCP header */
+    sr_construct_tcp_hdr_t *new_tcp_hdr = (sr_construct_tcp_hdr_t *) malloc(new_tcp_len);
+    new_tcp_hdr->ip_src = ip_hdr->ip_src;
+    new_tcp_hdr->ip_dst = ip_hdr->ip_dst;
+    new_tcp_hdr->reserved = 0;
+    new_tcp_hdr->ip_p = ip_protocol_tcp;
+    new_tcp_hdr->tcp_len = htons(tcp_len);
+    memcpy((uint8_t *) new_tcp_hdr + sizeof(sr_construct_tcp_hdr_t), (uint8_t *) tcp_hdr, tcp_len)sr_construct_tcp_hdr_t;
+
+    /* calculate checksum */
+    uint16_t checksum = cksum(new_tcp_hdr, new_tcp_len);
+
+    free(new_tcp_hdr);
+    return checksum;
+}
+
 int verify_icmp_packet(uint8_t *payload, unsigned int len) {
     sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *) payload;
 
@@ -503,7 +527,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
             /* Outbound message */
             printf("***IP NAT internal: outbound message\n");
 
-            struct sr_if *ext_intf = sr_get_interface(sr, "eth2");
+            struct sr_if *ext_intf = sr_get_interface(sr, NAT_EXT_INTF);
 
             switch (ip_hdr->ip_p)
             {
@@ -615,7 +639,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     tcp_hdr->src_port = htons(mapping->aux_ext);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = verify_tcp(tcp_hdr);
+                    tcp_hdr->tcp_cksum = tcp_hdr_cksum(packet, len);
 
                     break;
                 }
@@ -759,7 +783,7 @@ void handle_ip_nat(struct sr_instance *sr, uint8_t *packet, char *interface, uns
                     tcp_hdr->dest_port = htons(mapping->aux_int);
 
                     tcp_hdr->tcp_cksum = 0;
-                    tcp_hdr->tcp_cksum = verify_tcp(tcp_hdr);
+                    tcp_hdr->tcp_cksum = tcp_hdr_cksum(packet, len);
 
                     break;
                 }
